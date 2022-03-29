@@ -189,11 +189,15 @@ void *virt_clk_regs;
 // 2112 = (32 bytes per CB) * (2 common CB + (32 channels) * (2 CB per channel))
 uint32_t *pwm_data;
 
+uint32_t pwm_period;
+uint32_t pwm_n_channels;
 
 //int dma_test_mem_transfer(void);
 //void dma_test_led_flash(int pin);
+void pwm_set_period(uint32_t period);
 void put_cb(uint8_t idx, uint32_t mask, uint32_t delay);
-void init_cbs(uint8_t num);
+void pwm_begin(uint8_t num_ch, int freq);
+
 void attach_pwm(int pin);
 void terminate(int sig);
 void gpio_mode(int pin, int mode);
