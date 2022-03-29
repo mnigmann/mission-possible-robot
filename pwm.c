@@ -36,16 +36,44 @@ int main(int argc, char *argv[])
     // Ensure cleanup if user hits ctrl-C
     signal(SIGINT, terminate);
 
+    
+
+    pwm_begin(2, PWM_FREQ);
+    // Set LED pin as output, and set high
+    gpio_mode(LED_PIN, GPIO_OUT);
+    gpio_mode(23, GPIO_OUT);
+    
+    put_cb(0, (1<<LED_PIN)|(1<<23), 50);
+    put_cb(1, (1<<LED_PIN), 50);
+    put_cb(2, (1<<23), 500);
+    //pwm_set_period(2000);
+    for (int i=0; i < 9; i++) printf("  %08X\n", pwm_data[i]);
+    sleep(4);
+    //attach_pwm(LED_PIN);
+    terminate(0);
+}
+
+
+void pwm_set_period(uint32_t period) {
+    pwm_data[3*pwm_n_channels + 1] += period - pwm_period;
+    pwm_period = period;
+}
+
+void put_cb(uint8_t idx, uint32_t mask, uint32_t delay) {
+    idx = 3*idx;
+    pwm_data[idx] = mask;
+    pwm_data[idx+1] = delay;
+    pwm_data[idx+2] = 1;
+}
+
+void pwm_begin(uint8_t num_ch, int freq) {
+    pwm_n_channels = num_ch;
     // Map GPIO, DMA and PWM registers into virtual mem (user space)
     virt_gpio_regs = map_segment((void *)GPIO_BASE, PAGE_SIZE);
     virt_dma_regs = map_segment((void *)DMA_BASE, PAGE_SIZE);
     virt_pwm_regs = map_segment((void *)PWM_BASE, PAGE_SIZE);
     virt_clk_regs = map_segment((void *)CLK_BASE, PAGE_SIZE);
 
-    // Set LED pin as output, and set high
-    gpio_mode(LED_PIN, GPIO_OUT);
-    gpio_mode(23, GPIO_OUT);
-//    gpio_out(LED_PIN, 1);
     enable_dma();
 
     // Use mailbox to get uncached memory for DMA decriptors and buffers
@@ -56,52 +84,39 @@ int main(int argc, char *argv[])
             FAIL("Error: can't allocate uncached memory\n");
     printf("VC mem handle %u, phys %p, virt %p\n", dma_mem_h, bus_dma_mem, virt_dma_mem);
     pwm_data = (uint32_t *)(virt_dma_mem + 2112);
-    //memset(virt_dma_mem, 0, DMA_MEM_SIZE);
-    // Run DMA tests
-//    dma_test_mem_transfer();
-//    dma_test_led_flash(LED_PIN);
-    
+    memset(virt_dma_mem, 0, DMA_MEM_SIZE);
 
-    put_cb(0, (1<<LED_PIN)|(1<<23), 50);
-    put_cb(1, (1<<LED_PIN), 50);
-    put_cb(2, (1<<23), 50);
-    for (int i=0; i < 9; i++) printf("  %08X\n", pwm_data[i]);
-    init_cbs(2);
-    init_pwm(PWM_FREQ);
-    start_pwm();
-    printf("\n");
-    start_dma(virt_dma_mem);
-    disp_dma();
-    sleep(4);
-    //attach_pwm(LED_PIN);
-    terminate(0);
-}
-
-void put_cb(uint8_t idx, uint32_t mask, uint32_t delay) {
-    idx = 3*idx;
-    pwm_data[idx] = mask;
-    pwm_data[idx+1] = delay;
-    pwm_data[idx+2] = 1;
-}
-
-void init_cbs(uint8_t num) {
     DMA_CB * cbs = virt_dma_mem;
-    num = (num + 1)*2;
-    for (uint8_t i=0; i < num; i += 2) {
+    num_ch = (num_ch + 1)*2;
+    for (uint8_t i=0; i < num_ch; i += 2) {
         cbs[i].ti = (1 << 6) | (DMA_PWM_DREQ << 16) | DMA_CB_SRC_INC | DMA_CB_DEST_INC;
         cbs[i].srce_ad = BUS_DMA_MEM(pwm_data + i/2 * 3);
         cbs[i].dest_ad = BUS_GPIO_REG(i ? GPIO_CLR0 : GPIO_SET0);
         cbs[i].tfr_len = 4;
-        cbs[i].next_cb = BUS_DMA_MEM(&cbs[(i+1)%num]);
+        cbs[i].next_cb = BUS_DMA_MEM(&cbs[i+1]);
+        cbs[i].unused = 0;
+        put_cb(i/2, 0, 2);
     }
-    for (uint8_t i=1; i < num; i += 2) {
+    for (uint8_t i=1; i < num_ch; i += 2) {
         cbs[i].ti = (1 << 6) | (DMA_PWM_DREQ << 16) | DMA_CB_SRC_INC | DMA_CB_DEST_INC | (1<<1);
-        cbs[i].srce_ad = BUS_DMA_MEM(pwm_data + (i-1)/2 * 3 + 1);
+        if (i+1 < num_ch) cbs[i].srce_ad = BUS_DMA_MEM(pwm_data + (i-1)/2 * 3 + 4);
+        else cbs[i].srce_ad = BUS_DMA_MEM(pwm_data + 1);
         cbs[i].dest_ad = BUS_PWM_REG(PWM_RNG1);
         cbs[i].tfr_len = (2 << 16) | 4;
         cbs[i].stride = 4 << 16;
-        cbs[i].next_cb = BUS_DMA_MEM(&cbs[(i+1)%num]);
+        cbs[i].next_cb = BUS_DMA_MEM(&cbs[(i+1)%num_ch]);
+        cbs[i].unused = 0;
     }
+    pwm_period = num_ch;
+    init_pwm(freq);
+    *VIRT_PWM_REG(PWM_DMAC) = PWM_DMAC_ENAB|1;
+    start_pwm();
+    // This line is very important. Without this printf, the DMA doesn't load correctly.
+    // One could also use usleep(100000) instead, even though the delay caused by the
+    // printf is much lower. Why this is needed is still not known...
+    printf("\n");
+    start_dma(virt_dma_mem);
+    disp_dma();
 }
 
 // DMA trigger test: fLash LED using PWM trigger
