@@ -196,6 +196,7 @@ uint32_t pwm_n_channels;
 //void dma_test_led_flash(int pin);
 void pwm_set_period(uint32_t period);
 void put_cb(uint8_t idx, uint32_t mask, uint32_t delay);
+void pwm_set_channel(uint8_t pin, uint32_t on_time);
 void pwm_begin(uint8_t num_ch, int freq);
 
 void attach_pwm(int pin);
