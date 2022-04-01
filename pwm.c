@@ -46,16 +46,16 @@ int main(int argc, char *argv[])
     //put_cb(0, (1<<LED_PIN)|(1<<23), 40);
     //put_cb(1, (1<<LED_PIN), 40);
     //put_cb(2, (1<<23), 80);
-    pwm_set_period(20);
-    pwm_set_channel(LED_PIN, 10);
-    pwm_set_channel(23, 15);
-    for (int i=0; i < 9; i++) printf("  %08X: %08X\n", BUS_DMA_MEM(&pwm_data[i]), pwm_data[i]);
+    pwm_set_period(4000);
+    pwm_set_channel(LED_PIN, 500);
+    pwm_set_channel(23, 300);
     DMA_CB *cbs = virt_dma_mem;
+    for (int i=0; i < 9; i++) printf("  %08X: %08X\n", BUS_DMA_MEM(&pwm_data[i]), pwm_data[i]);
     for (int i=0; i < 6; i++) {
-        printf("%02d: SRCE_AD: %08X, DEST_AD: %08X\n", i, cbs[i].srce_ad, cbs[i].dest_ad);
+        printf("%02d: CB_ADDR: %08X, SRCE_AD: %08X, DEST_AD: %08X, NEXT_CB: %08X, OFFSET: %08X\n", i, BUS_DMA_MEM(&cbs[i]), cbs[i].srce_ad, cbs[i].dest_ad, cbs[i].next_cb, cbs[i].unused);
     }
     sleep(3);
-    pwm_set_channel(23, 5);
+    pwm_set_channel(LED_PIN, 100);
     sleep(3);
     //attach_pwm(LED_PIN);
     terminate(0);
@@ -96,16 +96,24 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
 
         if (old_pos > 0) {
             if (pwm_data[old_pos*3] == (1<<pin)) {
+                uint8_t below_old = 0;
+                for (uint8_t i=1; i < 33; i++) {
+                    if (cbs[i*2+1].next_cb == BUS_DMA_MEM(&cbs[old_pos*2])) below_old = i;
+                }
                 // If a control block exists that only controls this pin, empty that control block and bypass it
-                printf("CB %d controls %d\n", old_pos, pin);
+                // When doing this, one must be careful about the fact that each CB points to the pwm_data block
+                // that is one edge later.
+                printf("CB %d controls %d, the previous is at %d\n", old_pos, pin, below_old);
                 fflush(stdout);
-                cbs[2*old_pos - 1].next_cb = cbs[2*old_pos + 1].next_cb;
-                cbs[2*old_pos - 2].unused += cbs[2*old_pos].unused;
+                cbs[2*below_old + 1].next_cb = cbs[2*old_pos + 1].next_cb;
+                cbs[2*below_old + 1].srce_ad = cbs[2*old_pos + 1].srce_ad;
                 cbs[2*old_pos].unused = 0;
                 pwm_data[old_pos*3] = 0;
+                pwm_data[below_old*3 + 1] += pwm_data[old_pos*3 + 1];
             } else {
                 pwm_data[old_pos*3] &= ~(1<<pin);
             }
+
             pwm_set_channel(pin, on_time);
             return;
         }
@@ -113,19 +121,14 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
         printf("No CB found controlling pin %d, %d is empty; %d above and %d below\n", pin, empty_pos, above, below);
         printf("above time: %d, below time: %d, on time: %d, calc. delay: %d\n", cbs[2*above].unused, cbs[2*below].unused, on_time, cbs[below*2].unused+pwm_data[below*3+1]-on_time);
         cbs[empty_pos*2+1].next_cb = BUS_DMA_MEM(&cbs[above*2]);
+        cbs[empty_pos*2+1].srce_ad = BUS_DMA_MEM(&pwm_data[above*3 + 1]);
         cbs[below*2+1].next_cb = BUS_DMA_MEM(&cbs[empty_pos*2]);
+        cbs[below*2+1].srce_ad = BUS_DMA_MEM(&pwm_data[empty_pos*3 + 1]);
         pwm_data[empty_pos*3+1] = cbs[below*2].unused + pwm_data[below*3+1] - on_time;
         pwm_data[below*3+1] = on_time - cbs[below*2].unused;
         pwm_data[empty_pos*3] = (1<<pin);
         cbs[empty_pos*2].unused = on_time;
         
-        above = 0;
-        for (uint8_t i=1; i < 33; i++) {
-            if (cbs[i*2].unused > cbs[above*2].unused) above = i;
-            cbs[i*2+1].srce_ad = BUS_DMA_MEM(&pwm_data[i*3 + 4]);
-        }
-        printf("New highest is %d with %d; %d\n", above, cbs[2*above].unused, cbs[2].unused);
-        cbs[above*2+1].srce_ad = BUS_DMA_MEM(&pwm_data[1]);
     } else {
         pwm_data[0] &= ~(1<<pin);
     }
@@ -173,7 +176,6 @@ void pwm_begin(uint8_t num_ch, int freq) {
         cbs[i].dest_ad = BUS_PWM_REG(PWM_RNG1);
         cbs[i].tfr_len = (2 << 16) | 4;
         cbs[i].stride = 4 << 16;
-        printf("%d linked to %d\n", i, (i+1)%num_ch);
         //cbs[i].next_cb = BUS_DMA_MEM(&cbs[(i+1)%num_ch]);
     }
     cbs[1].next_cb = BUS_DMA_MEM(cbs);
