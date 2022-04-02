@@ -48,16 +48,18 @@ int main(int argc, char *argv[])
     //put_cb(2, (1<<23), 80);
     pwm_set_period(4000);
     pwm_set_channel(LED_PIN, 500);
-    pwm_set_channel(23, 300);
+    pwm_set_channel(23, 100);
     DMA_CB *cbs = virt_dma_mem;
     for (int i=0; i < 9; i++) printf("  %08X: %08X\n", BUS_DMA_MEM(&pwm_data[i]), pwm_data[i]);
     for (int i=0; i < 6; i++) {
         printf("%02d: CB_ADDR: %08X, SRCE_AD: %08X, DEST_AD: %08X, NEXT_CB: %08X, OFFSET: %08X\n", i, BUS_DMA_MEM(&cbs[i]), cbs[i].srce_ad, cbs[i].dest_ad, cbs[i].next_cb, cbs[i].unused);
     }
-    sleep(3);
-    pwm_set_channel(LED_PIN, 100);
-    sleep(3);
-    //attach_pwm(LED_PIN);
+    sleep(1);
+    for (uint32_t servo = 500; servo > 100; servo-=4) {
+        pwm_set_channel(LED_PIN, servo);
+        pwm_set_channel(23, 600-servo);
+        usleep(100000);
+    }
     terminate(0);
 }
 
@@ -87,7 +89,9 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
         uint8_t empty_pos = 0;
         uint8_t above = 0;      // Index of the CB executed after the new time
         uint8_t below = 0;      // Index of the CB executed before the new time
+        uint8_t equal = 0;
         for (uint8_t i=1; i < 33; i++) {
+            if (cbs[i*2].unused >= on_time - 4 && cbs[i*2].unused <= on_time + 4) equal = i;
             if (pwm_data[i*3] & (1<<pin)) old_pos = i;
             if (pwm_data[i*3] == 0 && empty_pos == 0) empty_pos = i;
             if (cbs[i*2].unused < on_time && cbs[i*2].unused > cbs[below*2].unused) below = i;
@@ -115,6 +119,9 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
             }
 
             pwm_set_channel(pin, on_time);
+            return;
+        } else if (equal > 0) {
+            pwm_data[3*equal] |= (1<<pin);
             return;
         }
 
