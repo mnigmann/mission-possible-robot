@@ -17,6 +17,9 @@
 // v0.10 JPB 25/5/20
 //
 
+#ifndef PERIPHERALS_H
+#define PERIPHERALS_H
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -75,7 +78,7 @@
 #define GPIO_ALT5       2
 
 // Virtual memory pointers to acceess GPIO, DMA and PWM from user space
-void *virt_gpio_regs, *virt_dma_regs, *virt_pwm_regs;
+void *virt_gpio_regs, *virt_dma_regs, *virt_pwm_regs, *virt_spi_regs;
 // VC mailbox file descriptor & handle, and bus memory pointer
 int mbox_fd, dma_mem_h;
 void *bus_dma_mem;
@@ -123,8 +126,7 @@ typedef struct {
 #define DMA_DEBUG       (DMA_CHAN*0x100 + 0x20)
 #define DMA_ENABLE      0xff0
 #define VIRT_DMA_REG(a) ((volatile uint32_t *)((uint32_t)virt_dma_regs + a))
-char *dma_regstrs[] = {"DMA CS", "CB_AD", "TI", "SRCE_AD", "DEST_AD",
-    "TFR_LEN", "STRIDE", "NEXT_CB", "DEBUG", ""};
+char *dma_regstrs[10];
 
 // DMA control block (must be 32-byte aligned)
 typedef struct {
@@ -165,6 +167,16 @@ void *virt_dma_mem;
 #define PWM_PIN         18      // GPIO pin for PWM output
 #define PWM_OUT         1       // Set non-zero to enable PWM output pin
 
+// SPI control registers
+#define SPI_BASE        (PHYS_REG_BASE + 0x204000)
+#define SPI_CS          0x00
+#define SPI_FIFO        0x04
+#define SPI_CLK         0x08
+#define SPI_DLEN        0x0c
+#define SPI_LTOH        0x10
+#define SPI_DC          0x14
+#define VIRT_SPI_REG(a) ((volatile uint32_t *)((uint32_t)virt_spi_regs + (a)))
+
 // Clock
 void *virt_clk_regs;
 #define CLK_BASE        (PHYS_REG_BASE + 0x101000)
@@ -199,21 +211,22 @@ void put_cb(uint8_t idx, uint32_t mask, uint32_t delay);
 void pwm_set_channel(uint8_t pin, uint32_t on_time);
 void pwm_begin(uint8_t num_ch, int freq);
 
-void attach_pwm(int pin);
+void init_memory();
+
 void terminate(int sig);
-void gpio_mode(int pin, int mode);
-void gpio_out(int pin, int val);
-uint8_t gpio_in(int pin);
-int open_mbox(void);
-void close_mbox(int fd);
-uint32_t msg_mbox(int fd, VC_MSG *msgp);
-void *map_segment(void *addr, int size);
-void unmap_segment(void *addr, int size);
-uint32_t alloc_vc_mem(int fd, uint32_t size, VC_ALLOC_FLAGS flags);
-void *lock_vc_mem(int fd, int h);
-uint32_t unlock_vc_mem(int fd, int h);
-uint32_t free_vc_mem(int fd, int h);
-uint32_t set_vc_clock(int fd, int id, uint32_t freq);
+void gpio_mode(int pin, int mode); 
+void gpio_out(int pin, int val); 
+uint8_t gpio_in(int pin); 
+int open_mbox(void); 
+void close_mbox(int fd); 
+uint32_t msg_mbox(int fd, VC_MSG *msgp); 
+void *map_segment(void *addr, int size); 
+void unmap_segment(void *addr, int size); 
+uint32_t alloc_vc_mem(int fd, uint32_t size, VC_ALLOC_FLAGS flags); 
+void *lock_vc_mem(int fd, int h); 
+uint32_t unlock_vc_mem(int fd, int h); 
+uint32_t free_vc_mem(int fd, int h); 
+uint32_t set_vc_clock(int fd, int id, uint32_t freq); 
 void disp_vc_msg(VC_MSG *msgp);
 void enable_dma(void);
 void start_dma(DMA_CB *cbp);
@@ -222,4 +235,6 @@ void disp_dma(void);
 void init_pwm(int freq);
 void start_pwm(void);
 void stop_pwm(void);
+
+#endif
 
