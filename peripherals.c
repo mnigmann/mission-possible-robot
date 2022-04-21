@@ -18,6 +18,7 @@ void init_memory() {
     virt_dma_regs = map_segment((void *)DMA_BASE, PAGE_SIZE);
     virt_pwm_regs = map_segment((void *)PWM_BASE, PAGE_SIZE);
     virt_clk_regs = map_segment((void *)CLK_BASE, PAGE_SIZE);
+    virt_spi_regs = map_segment((void *)SPI_BASE, PAGE_SIZE);
 
 
     // Use mailbox to get uncached memory for DMA decriptors and buffers
@@ -42,6 +43,7 @@ void terminate(int sig)
     unlock_vc_mem(mbox_fd, dma_mem_h); 
     free_vc_mem(mbox_fd, dma_mem_h); 
     close_mbox(mbox_fd); 
+    unmap_segment(virt_spi_regs, PAGE_SIZE);
     unmap_segment(virt_clk_regs, PAGE_SIZE); 
     unmap_segment(virt_pwm_regs, PAGE_SIZE); 
     unmap_segment(virt_dma_regs, PAGE_SIZE); 
@@ -68,6 +70,16 @@ void gpio_out(int pin, int val) {
 uint8_t gpio_in(int pin) {
     uint32_t *reg = VIRT_GPIO_REG(GPIO_LEV0) + pin/32;
     return (((*reg) >> (pin % 32)) & 1);
+}
+
+void gpio_pud(int pin, uint8_t mode) {
+    *VIRT_GPIO_REG(GPIO_GPPUD) = mode;
+    usleep(100);
+    uint32_t *reg = VIRT_GPIO_REG(GPIO_GPPUDCLK0) + pin/32;
+    *reg = 1 << (pin % 32);
+    usleep(100);
+    *VIRT_GPIO_REG(GPIO_GPPUD) = 0;
+    *reg = 0;
 }
 
 // ----- VIDEOCORE MAILBOX -----
