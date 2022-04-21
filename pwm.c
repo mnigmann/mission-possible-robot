@@ -31,6 +31,8 @@
 
 
 // Main program
+// It is necessary to include -DMAIN_IS_PWM when compiling
+#ifdef MAIN_IS_PWM
 int main(int argc, char *argv[])
 {
     // Ensure cleanup if user hits ctrl-C
@@ -40,28 +42,37 @@ int main(int argc, char *argv[])
     init_memory();
     pwm_begin(32, PWM_FREQ);
     // Set LED pin as output, and set high
-    gpio_mode(LED_PIN, GPIO_OUT);
+    gpio_mode(18, GPIO_OUT);
     gpio_mode(23, GPIO_OUT);
     
     //put_cb(0, (1<<LED_PIN)|(1<<23), 40);
     //put_cb(1, (1<<LED_PIN), 40);
     //put_cb(2, (1<<23), 80);
     pwm_set_period(4000);
-    pwm_set_channel(LED_PIN, 500);
-    pwm_set_channel(23, 100);
+    pwm_set_channel(18, 500);
+    pwm_set_channel(23, 300);
+    pwm_set_channel(17, 300);
     DMA_CB *cbs = virt_dma_mem;
     for (int i=0; i < 9; i++) printf("  %08X: %08X\n", BUS_DMA_MEM(&pwm_data[i]), pwm_data[i]);
     for (int i=0; i < 6; i++) {
         printf("%02d: CB_ADDR: %08X, SRCE_AD: %08X, DEST_AD: %08X, NEXT_CB: %08X, OFFSET: %08X\n", i, BUS_DMA_MEM(&cbs[i]), cbs[i].srce_ad, cbs[i].dest_ad, cbs[i].next_cb, cbs[i].unused);
     }
-    sleep(1);
+/*    sleep(2);
+    pwm_set_channel(LED_PIN, 300);
+    pwm_set_channel(23, 300);
+    sleep(2);
+    pwm_set_channel(LED_PIN, 100);
+    pwm_set_channel(23, 500);
+    sleep(2);*/
+    
     for (uint32_t servo = 500; servo > 100; servo-=4) {
-        pwm_set_channel(LED_PIN, servo);
-        pwm_set_channel(23, 600-servo);
+        pwm_set_channel(18, servo);
+        // pwm_set_channel(23, 600-servo);
         usleep(100000);
     }
     terminate(0);
 }
+#endif
 
 void pwm_set_period(uint32_t period) {
     DMA_CB *cbs = virt_dma_mem;
@@ -69,7 +80,9 @@ void pwm_set_period(uint32_t period) {
     for (uint8_t i=1; i < 33; i++) {
         if (cbs[i*2].unused > cbs[last*2].unused) last = i;
     }
+#if DEBUG
     printf("Last in chain: %d with %d\n", last, cbs[last*2].unused);
+#endif
     pwm_data[last*3 + 1] = period - cbs[last*2].unused;
 }
 
@@ -107,8 +120,10 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
                 // If a control block exists that only controls this pin, empty that control block and bypass it
                 // When doing this, one must be careful about the fact that each CB points to the pwm_data block
                 // that is one edge later.
+#if DEBUG
                 printf("CB %d controls %d, the previous is at %d\n", old_pos, pin, below_old);
                 fflush(stdout);
+#endif
                 cbs[2*below_old + 1].next_cb = cbs[2*old_pos + 1].next_cb;
                 cbs[2*below_old + 1].srce_ad = cbs[2*old_pos + 1].srce_ad;
                 cbs[2*old_pos].unused = 0;
@@ -124,9 +139,10 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
             pwm_data[3*equal] |= (1<<pin);
             return;
         }
-
+#if DEBUG
         printf("No CB found controlling pin %d, %d is empty; %d above and %d below\n", pin, empty_pos, above, below);
         printf("above time: %d, below time: %d, on time: %d, calc. delay: %d\n", cbs[2*above].unused, cbs[2*below].unused, on_time, cbs[below*2].unused+pwm_data[below*3+1]-on_time);
+#endif
         cbs[empty_pos*2+1].next_cb = BUS_DMA_MEM(&cbs[above*2]);
         cbs[empty_pos*2+1].srce_ad = BUS_DMA_MEM(&pwm_data[above*3 + 1]);
         cbs[below*2+1].next_cb = BUS_DMA_MEM(&cbs[empty_pos*2]);
