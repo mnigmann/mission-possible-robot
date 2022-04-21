@@ -67,6 +67,8 @@
 #define GPIO_SET0       0x1c
 #define GPIO_CLR0       0x28
 #define GPIO_LEV0       0x34
+#define GPIO_GPPUD      0x94
+#define GPIO_GPPUDCLK0  0x98
 #define VIRT_GPIO_REG(a) ((uint32_t *)((uint32_t)virt_gpio_regs + (a)))
 #define BUS_GPIO_REG(a) (GPIO_BASE-PHYS_REG_BASE+BUS_REG_BASE+(uint32_t)(a))
 #define GPIO_IN         0
@@ -76,6 +78,9 @@
 #define GPIO_ALT3       7
 #define GPIO_ALT4       3
 #define GPIO_ALT5       2
+#define GPIO_PUD_OFF    0
+#define GPIO_PUD_DOWN   1
+#define GPIO_PUD_UP     2
 
 // Virtual memory pointers to acceess GPIO, DMA and PWM from user space
 void *virt_gpio_regs, *virt_dma_regs, *virt_pwm_regs, *virt_spi_regs;
@@ -211,12 +216,16 @@ void put_cb(uint8_t idx, uint32_t mask, uint32_t delay);
 void pwm_set_channel(uint8_t pin, uint32_t on_time);
 void pwm_begin(uint8_t num_ch, int freq);
 
+double measure(int ch, uint32_t sampling_interval, uint8_t csmode);
+double measure_precise(int ch, uint32_t sampling_interval, uint8_t csmode);
+
 void init_memory();
 
 void terminate(int sig);
 void gpio_mode(int pin, int mode); 
 void gpio_out(int pin, int val); 
-uint8_t gpio_in(int pin); 
+uint8_t gpio_in(int pin);
+void gpio_pud(int pin, uint8_t mode);
 int open_mbox(void); 
 void close_mbox(int fd); 
 uint32_t msg_mbox(int fd, VC_MSG *msgp); 
