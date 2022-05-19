@@ -28,7 +28,10 @@ void init_memory() {
         (virt_dma_mem = map_segment(BUS_PHYS_ADDR(bus_dma_mem), DMA_MEM_SIZE)) == 0)
             FAIL("Error: can't allocate uncached memory\n");
     printf("VC mem handle %u, phys %p, virt %p\n", dma_mem_h, bus_dma_mem, virt_dma_mem);
-    pwm_data = (uint32_t *)(virt_dma_mem + 2112);
+    pwm_data = (uint32_t *)(virt_dma_mem) + 528;
+    pwm_data_buffer = (uint32_t *)(malloc(396));
+    cbs = (DMA_CB *)(virt_dma_mem);
+    cbs_buffer = (DMA_CB *)(malloc(2112));
     memset(virt_dma_mem, 0, DMA_MEM_SIZE);
 }
 
@@ -39,6 +42,8 @@ void terminate(int sig)
     stop_pwm(); 
     stop_dma(); 
     gpio_out(LED_PIN, 0); 
+    free(pwm_data_buffer);
+    free(cbs_buffer);
     unmap_segment(virt_dma_mem, DMA_MEM_SIZE); 
     unlock_vc_mem(mbox_fd, dma_mem_h); 
     free_vc_mem(mbox_fd, dma_mem_h); 
