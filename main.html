@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Controls</title>
+    <style>
+        :root {
+            --cnh: calc(100vh - 18px);
+            --cnw: calc(100vw - 18px);
+            --slh: 20vw;
+            --slw: 20vw;
+        }
+        html, body {
+            height: 100%;
+        }
+        #controls {
+            position: relative;
+            border: 1px solid black;
+            height: var(--cnh);
+            width: var(--cnw);
+        }
+        #controls #background {
+            position: absolute;
+            border-left: 2px solid black;
+            border-right: 2px solid black;
+            width: calc(0.5 * var(--cnw));
+            height: var(--cnh);
+            left: calc(0.25 * var(--cnw) - 2px);
+        }
+        #controls .slider {
+            position: absolute;
+            width: var(--slw);
+            height: var(--slh);
+            background: gray;
+            border: 1px solid gray;
+            touch-action: none;
+            top: calc(0.5 * (var(--cnh) - var(--slh) - 2px));
+        }
+
+    </style>
+</head>
+<body>
+<script>
+    function req() {
+        req = new XMLHttpRequest();
+        req.open("GET", "/cmd");
+        req.send();
+    }
+
+    window.control = {dragging: {}, pwm: {}};
+
+    function sendPWM(pwm) {
+        req = new XMLHttpRequest();
+        req.open("GET", "/cmd"+Object.keys(pwm).reduce((a,b)=>(a+(a?"&":"?")+b+"="+pwm[b]), ""));
+        req.send();
+    }
+
+
+    function touched(evt) {
+        var ch = evt.touches;
+        for (var i=0; i < ch.length; i++) {
+            if (!(window.control.dragging[ch[i].identifier])) {
+                window.control.dragging[ch[i].identifier] = [this, ch[i].pageY - parseFloat(this.style.top || window.getComputedStyle(this).top)];
+            }
+        }
+        console.log(window.control.dragging);
+    }
+
+    function unclicked(evt) {
+        var n = {}
+        var ch = evt.touches;
+        var pwm = {left: 300, right: 300};
+        for (var i=0; i < ch.length; i++) {
+            var dr = window.control.dragging[ch[i].identifier];
+            n[ch[i].identifier] = dr;
+            var height = parseFloat(window.getComputedStyle(dr[0].parentElement).height) - parseFloat(window.getComputedStyle(dr[0]).height) - 2;
+            var top_val = Math.max(0, Math.min(height, ch[i].pageY - dr[1]));
+            dr[0].style.top = top_val + "px";
+            pwm[dr[0].id] = Math.trunc(200 + 200*top_val/height);
+        }
+        // Iterate over the buttons that have been released
+        for (var i in window.control.dragging) {
+            if (n[i]) continue;
+            var dr = window.control.dragging[i];
+            var height = parseFloat(window.getComputedStyle(dr[0].parentElement).height) - parseFloat(window.getComputedStyle(dr[0]).height) - 2;
+            dr[0].style.top = (height/2) + "px";
+        }
+        window.control.dragging = n;
+        //sendPWM(pwm);
+        window.control.pwm = pwm;
+        console.log(window.control.dragging, pwm);
+    }
+
+    function drag(evt) {
+        var ch = evt.touches;
+        var pwm = {left: 300, right: 300};
+        for (var i=0; i < ch.length; i++) {
+            var dr = window.control.dragging[ch[i].identifier];
+            var height = parseFloat(window.getComputedStyle(dr[0].parentElement).height) - parseFloat(window.getComputedStyle(dr[0]).height) - 2;
+            var top_val = Math.max(0, Math.min(height, ch[i].pageY - dr[1]));
+            dr[0].style.top = top_val + "px";
+            pwm[dr[0].id] = Math.trunc(400 - 200*top_val/height);
+        }
+        window.control.pwm = pwm;
+        console.log(pwm);
+    }
+    document.addEventListener("DOMContentLoaded", function() {
+        document.addEventListener("touchend", unclicked);
+        document.addEventListener("touchmove", drag);
+        document.getElementById("left").addEventListener("touchstart", touched);
+        document.getElementById("right").addEventListener("touchstart", touched);
+        window.setInterval(function(){if(Object.keys(window.control.pwm).length)sendPWM(window.control.pwm);}, 100);
+    });
+</script>
+<div id="controls">
+    <div id="background">
+
+    </div>
+    <div class="slider" style="left: calc(0.25 * var(--cnw) - 0.5 * var(--slw) - 2px);" id="left">
+
+    </div>
+    <div class="slider" style="right: calc(0.25 * var(--cnw) - 0.5 * var(--slw) - 2px);" id="right">
+
+    </div>
+</div>
+</body>
+</html>

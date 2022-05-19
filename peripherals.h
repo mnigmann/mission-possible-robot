@@ -39,7 +39,9 @@
 #define BUS_REG_BASE    0x7E000000
 
 // If non-zero, print debug information
+#ifndef DEBUG
 #define DEBUG           0
+#endif
 
 // Output pin to use for LED
 //#define LED_PIN         47    // Pi Zero onboard LED
@@ -205,9 +207,17 @@ void *virt_clk_regs;
 // of channels with PWM enabled.
 // 2112 = (32 bytes per CB) * (2 common CB + (32 channels) * (2 CB per channel))
 uint32_t *pwm_data;
+uint32_t *pwm_data_buffer;
+
+DMA_CB *cbs, *cbs_buffer;
 
 uint32_t pwm_period;
 uint32_t pwm_n_channels;
+
+int main_server();
+void close_conn(int c);
+uint8_t serve_file(char *headers, char *filename);
+
 
 //int dma_test_mem_transfer(void);
 //void dma_test_led_flash(int pin);
@@ -215,6 +225,7 @@ void pwm_set_period(uint32_t period);
 void put_cb(uint8_t idx, uint32_t mask, uint32_t delay);
 void pwm_set_channel(uint8_t pin, uint32_t on_time);
 void pwm_begin(uint8_t num_ch, int freq);
+void pwm_update();
 
 double measure(int ch, uint32_t sampling_interval, uint8_t csmode);
 double measure_precise(int ch, uint32_t sampling_interval, uint8_t csmode);
