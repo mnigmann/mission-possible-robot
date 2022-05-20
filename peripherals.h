@@ -195,6 +195,10 @@ void *virt_clk_regs;
 #define PWM_CLOCK_ID    0xa
 
 #define FAIL(x) {printf(x); terminate(0);}
+#define LOG(fmt, ...) fprintf(logptr, "[%12ld] " fmt, (long int)(time(NULL)), ##__VA_ARGS__)
+#define LOG_FLUSH fflush(logptr)
+
+FILE *logptr;
 
 // Define a location for the pwm cycle lengths.
 // With a total of 32 channels, there must be 64 CBs total.
@@ -214,10 +218,11 @@ DMA_CB *cbs, *cbs_buffer;
 uint32_t pwm_period;
 uint32_t pwm_n_channels;
 
-int main_server();
+int main_server(int *pipes);
 void close_conn(int c);
 uint8_t serve_file(char *headers, char *filename);
 
+int main_remote(int *pipes);
 
 //int dma_test_mem_transfer(void);
 //void dma_test_led_flash(int pin);
