@@ -1,22 +1,11 @@
 #include <ncurses.h>
+#include <time.h>
+#include <fcntl.h>
 #include "peripherals.h"
+#include "config.h"
 
-#define MOTOR_LEFT      17
-#define MOTOR_RIGHT     23
-
-#define SERVO_AZIMUTH   24
-#define SERVO_ELEVATION 18
-
-#define MOTOR_SHOVEL    15  // RXD
-#define MOTOR_ARM       14  // TXD
-#define MOTOR_FLAG      21  
-
-#define MOTOR_ARM_ONTIME    1500000
-#define MOTOR_SHOVEL_ONTIME 400000
-#define MOTOR_SHOVEL_SPEED  50
-
-uint16_t pwm_value;
-char temp[32];
+char temp[64];
+char inbuf[10];
 uint16_t c;
 
 void getSunAngle(double *az, double *el) {
@@ -32,13 +21,11 @@ void getSunAngle(double *az, double *el) {
         pwm_update();
         usleep(100000);
         double m_time = measure_precise(0, 4000, 0);
-        sprintf(temp, "%03d: %f", i, m_time);
+        LOG("%03d: %f\n", i, m_time); LOG_FLUSH;
         if (m_time < bestValue) {
             bestAngle = i;
             bestValue = m_time;
         }
-        mvaddstr(r, 2, temp);
-        refresh();
         usleep(150000);
         r++;
     }
@@ -59,137 +46,219 @@ void getSunAngle(double *az, double *el) {
             bestAngle = i;
             bestValue = m_time;
         }
-        sprintf(temp, "%03d: %f", i, m_time);
-        mvaddstr(r, 30, temp);
-        refresh();
+        LOG("%03d: %f\n", i, m_time); LOG_FLUSH;
         usleep(150000);
         r++;
     }
-    sprintf(temp, "Best angle found: %d", bestAngle);
-    mvaddstr(r, 30, temp);
-    refresh();
+    LOG("Best angle found: %d\n", bestAngle); LOG_FLUSH;
     *el = (480 - bestAngle) / 2;
     pwm_set_channel(SERVO_ELEVATION, bestAngle);
     while (*VIRT_DMA_REG(DMA_NEXTCONBK) != BUS_DMA_MEM(virt_dma_mem));
     pwm_update();
 }
 
+void deploy_arm() {
+    mvaddstr(3, UI_ST, "deploying ");
+    refresh();
+    pwm_set_channel(MOTOR_ARM, 370);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    usleep(MOTOR_ARM_ONTIME);
+    pwm_set_channel(MOTOR_ARM, 300);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    mvaddstr(3, UI_ST, "deployed  ");
+    refresh();
+}
+
+void retract_arm() {
+    mvaddstr(3, UI_ST, "retracting");
+    refresh();
+    pwm_set_channel(MOTOR_ARM, 230);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    usleep(MOTOR_ARM_ONTIME);
+    pwm_set_channel(MOTOR_ARM, 300);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    mvaddstr(3, UI_ST, "retracted ");
+    refresh();
+}
+
+void lower_shovel() {
+    mvaddstr(5, UI_ST, "lowering");
+    refresh();
+    pwm_set_channel(MOTOR_SHOVEL, 300+MOTOR_SHOVEL_SPEED);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    usleep(MOTOR_SHOVEL_ONTIME);
+    pwm_set_channel(MOTOR_SHOVEL, 300);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    mvaddstr(5, UI_ST, "lowered ");
+    refresh();
+}
+
+void raise_shovel() {
+    mvaddstr(5, UI_ST, "raising ");
+    refresh();
+    pwm_set_channel(MOTOR_SHOVEL, 300-MOTOR_SHOVEL_SPEED);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    usleep(MOTOR_SHOVEL_ONTIME);
+    pwm_set_channel(MOTOR_SHOVEL, 300);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    mvaddstr(5, UI_ST, "raised  ");
+    refresh();
+}
+
+#ifdef MAIN_IS_REMOTE
 int main() {
-    WINDOW *win;
 
     init_memory();
     pwm_begin(32, 100000);
     
-    win = initscr();
+    pwm_set_period(4000);
 
-    nodelay(win, 0);
-    noecho();
-    cbreak();
-    keypad(win, true);
+    return main_remote(NULL);
+}
+#endif
 
-    gpio_mode(MOTOR_LEFT, 1);
-    gpio_mode(MOTOR_RIGHT, 1);
+int main_remote(int *pipes) {
     gpio_mode(SERVO_AZIMUTH, 1);
     gpio_mode(SERVO_ELEVATION, 1);
     gpio_mode(MOTOR_ARM, 1);
     gpio_mode(MOTOR_SHOVEL, 1);
-
-    pwm_set_period(4000);
-    pwm_set_channel(MOTOR_LEFT, 300);
-    pwm_set_channel(MOTOR_RIGHT, 300);
+    gpio_mode(ENC_CLK, 0);
+    gpio_mode(ENC_DIR, 0);
+    
     pwm_set_channel(SERVO_AZIMUTH, 120);
     pwm_set_channel(SERVO_ELEVATION, 480);
     pwm_set_channel(MOTOR_ARM, 300);
     pwm_set_channel(MOTOR_SHOVEL, 300);
     pwm_update();    
-    pwm_value = 300;
+    
+    logptr = fopen("/home/pi/robot_log.txt", "a");
+    LOG("------------ STARTING ROBOT ------------\n"); LOG_FLUSH;
+
+#ifndef MAIN_IS_REMOTE
+    fcntl(pipes[0], F_SETFL, O_NONBLOCK);
+#endif
+
+    WINDOW *win;
+
+    win = initscr();
+
+    nodelay(win, 1);
+    noecho();
+    cbreak();
+    keypad(win, true);
+
+    attron(A_BOLD);
+    mvaddstr(2, UI_SU, "Subsystem");
+    mvaddstr(2, UI_ST, "State");
+    mvaddstr(2, UI_VA, "Last value");
+    attroff(A_BOLD);
+    mvaddstr(3, UI_SU, "Arm");
+    mvaddstr(3, UI_ST, "retracted");
+    mvaddstr(4, UI_SU + 4, "Temperature sensor");
+    mvaddstr(4, UI_ST, "not connected");
+    mvaddstr(5, UI_SU, "Shovel");
+    mvaddstr(5, UI_ST, "raised");
+    mvaddstr(6, UI_SU + 4, "Salinity sensor");
+    mvaddstr(7, UI_SU, "Solar sensor");
+    mvaddstr(7, UI_ST, "idle");
+    mvaddstr(8, UI_SU, "Anemometer");
+    mvaddstr(8, UI_ST, "not sampling");
+    mvaddstr(9, UI_SU, "Drive motors");
+#ifdef MAIN_IS_REMOTE
+    mvaddstr(9, UI_ST, "not supported");
+#else
+    mvaddstr(9, UI_ST, "connected");
+#endif
+    refresh();
+
+    raise_shovel();
 
     while (1) {
-        sprintf(temp, "Motor speed: %-3d", pwm_value);
-        mvaddstr(1, 2, temp);
         c = getch();
-        if (c == ']') {
-            pwm_value = (pwm_value == 500 ? 500 : pwm_value+1);
-//            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_set_channel(MOTOR_LEFT, pwm_value);
-            pwm_set_channel(MOTOR_RIGHT, pwm_value);
-        } else if (c == '[') {
-            pwm_value = (pwm_value == 100 ? 100 : pwm_value-1);
-//            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_set_channel(MOTOR_LEFT, pwm_value);
-            pwm_set_channel(MOTOR_RIGHT, pwm_value);
-        } else if (c == KEY_UP) {
-//            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_set_channel(MOTOR_LEFT, pwm_value);
-            pwm_set_channel(MOTOR_RIGHT, pwm_value);
-        } else if (c == KEY_DOWN) {
-//            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_set_channel(MOTOR_LEFT, 600-pwm_value);
-            pwm_set_channel(MOTOR_RIGHT, 600-pwm_value);
-        } else if (c == KEY_RIGHT) {
-//            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-//            pwm_set_channel(MOTOR_LEFT, pwm_value);
-            pwm_set_channel(MOTOR_RIGHT, 600-pwm_value);
-        } else if (c == KEY_LEFT) {
-//            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_set_channel(MOTOR_LEFT, 600-pwm_value);
-//            pwm_set_channel(MOTOR_RIGHT, pwm_value);
-        } else if (c == ' ') {
+        if (c == ' ') {
 //            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
             pwm_set_channel(MOTOR_LEFT, 300);
             pwm_set_channel(MOTOR_RIGHT, 300);
         } else if (c == 's') {
-            mvaddstr(2, 2, "testing servo");
+            mvaddstr(7, UI_ST, "searching");
             refresh();
-            double elevation, azimuth;
+            double elevation = 0, azimuth = 0;
             getSunAngle(&azimuth, &elevation);
-            sprintf(temp, "found az %f, el %f", azimuth, elevation);
-            mvaddstr(2, 2, temp);
+            sprintf(temp, "azimuth %f, elevation %f      ", azimuth, elevation);
+            LOG("Sun position: az %f, el %f\n", azimuth, elevation); LOG_FLUSH;
+            mvaddstr(7, UI_VA, temp);
+            mvaddstr(7, UI_ST, "idle     ");
             refresh();
         } else if (c == 'a') {
-            pwm_set_channel(MOTOR_ARM, 370);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
-            usleep(MOTOR_ARM_ONTIME);
-            pwm_set_channel(MOTOR_ARM, 300);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
+            deploy_arm();
         } else if (c == 'A') {
-            pwm_set_channel(MOTOR_ARM, 230);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
-            usleep(MOTOR_ARM_ONTIME);
-            pwm_set_channel(MOTOR_ARM, 300);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
+            retract_arm();
         } else if (c == 'g') {
-            printf("Running shovel");
-            pwm_set_channel(MOTOR_SHOVEL, 300+MOTOR_SHOVEL_SPEED);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
-            usleep(MOTOR_SHOVEL_ONTIME);
-            pwm_set_channel(MOTOR_SHOVEL, 300);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
+            lower_shovel();
         } else if (c == 'G') {
-            pwm_set_channel(MOTOR_SHOVEL, 300-MOTOR_SHOVEL_SPEED);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
-            usleep(MOTOR_SHOVEL_ONTIME);
-            pwm_set_channel(MOTOR_SHOVEL, 300);
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
-            pwm_update();
+            raise_shovel();
+        } else if (c == 'v') {
+            mvaddstr(8, UI_ST, "sampling    ");
+            refresh();
+            clock_t start = clock();
+            uint32_t total = 0, val, last_value = 0;
+            double avg = 0;
+
+            while (1) {
+                val = gpio_in(ENC_CLK);
+                if (val > last_value) {
+                    if (gpio_in(ENC_DIR)) total++;
+                    else total--;
+                    usleep(100);
+                } else if (val < last_value) usleep(100);
+                last_value = gpio_in(ENC_CLK);
+                avg = (double)total*CLOCKS_PER_SEC/((double)(clock() - start));
+                sprintf(temp, "average speed: %f, probably %c     ", avg, (avg < 10 ? 'O' : (avg < 40 ? 'L' : (avg < 70 ? 'M' : 'H'))));
+                mvaddstr(8, UI_VA, temp);
+                refresh();
+                if (getch() == 'V') {
+                    mvaddstr(8, UI_ST, "not sampling");
+                    refresh();
+                    LOG("Anemometer sampling interval was %f, average speed: %f, probably %c\n", ((double)(clock() - start))/CLOCKS_PER_SEC, avg, (avg < 10 ? 'O' : (avg < 40 ? 'L' : (avg < 70 ? 'M' : 'H'))));
+                    break;
+                }
+            }
+        } else if (c == 'S') {
+            double sal = measure_precise(0, 10000, 0b100);
+            sprintf(temp, "Measured value: %f", sal);
+            mvaddstr(6, UI_VA, temp);
+            refresh();
         } else if (c == 'q') break;
-        if (c) {
-            while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+        //if (c) {
+        //    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+        //    pwm_update();
+        //}
+#ifndef MAIN_IS_REMOTE
+        if (read(pipes[0], inbuf, 10) > 0) {
+            int left = 300, right = 300;
+            right = strtol(inbuf + 5, NULL, 16);
+            inbuf[5] = 0;
+            left = strtol(inbuf + 1, NULL, 16);
+            pwm_set_channel(MOTOR_LEFT, left);
+            pwm_set_channel(MOTOR_RIGHT, right);
             pwm_update();
         }
+#endif
     }
     
     delwin(win);
     endwin();
     refresh();
     terminate(0);
+    fclose(logptr);
 
     return 0;
 }
