@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include "peripherals.h"
 
 
@@ -83,6 +84,7 @@ int main(int argc, char *argv[])
 #endif
 
 void pwm_set_period(uint32_t period) {
+    pwm_period = period;
     DMA_CB *cbs = virt_dma_mem;
     uint8_t last = 0;
     for (uint8_t i=1; i < 33; i++) {
@@ -131,8 +133,13 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
                 // When doing this, one must be careful about the fact that each CB points to the pwm_data block
                 // that is one edge later.
 #if DEBUG
-                printf("CB %d controls %d, the previous is at %d\n", old_pos, pin, below_old);
-                fflush(stdout);
+                if (logptr) {
+                    LOG("CB %d controls %d, the previous is at %d\n", old_pos, pin, below_old);
+                    LOG_FLUSH;
+                } else {
+                    printf("CB %d controls %d, the previous is at %d\n", old_pos, pin, below_old);
+                    fflush(stdout);
+                }
 #endif
                 cbs_buffer[2*below_old + 1].next_cb = cbs_buffer[2*old_pos + 1].next_cb;
                 cbs_buffer[2*below_old + 1].srce_ad = cbs_buffer[2*old_pos + 1].srce_ad;
@@ -150,14 +157,21 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
             return;
         }
 #if DEBUG
-        printf("No CB found controlling pin %d (%d), %d is empty; %d above and %d below\n", pin, on_time, empty_pos, above, below);
-        printf("above time: %d, below time: %d, on time: %d, calc. delay: %d\n", cbs_buffer[2*above].unused, cbs_buffer[2*below].unused, on_time, cbs_buffer[below*2].unused+pwm_data_buffer[below*3+1]-on_time);
+        if (logptr) {
+            LOG("No CB found controlling pin %d (%d), %d is empty; %d above and %d below\n", pin, on_time, empty_pos, above, below);
+            LOG("above time: %d, below time: %d, below delay: %d, on time: %d, calc. delay: %d\n", cbs_buffer[2*above].unused, cbs_buffer[2*below].unused, pwm_data_buffer[below*3+1], on_time, cbs_buffer[below*2].unused+pwm_data_buffer[below*3+1]-on_time);
+            LOG_FLUSH;
+        } else {
+            printf("No CB found controlling pin %d (%d), %d is empty; %d above and %d below\n", pin, on_time, empty_pos, above, below);
+            printf("above time: %d, below time: %d, on time: %d, calc. delay: %d\n", cbs_buffer[2*above].unused, cbs_buffer[2*below].unused, on_time, cbs_buffer[below*2].unused+pwm_data_buffer[below*3+1]-on_time);
+        }
 #endif
         cbs_buffer[empty_pos*2+1].next_cb = BUS_DMA_MEM(&cbs[above*2]);
         cbs_buffer[empty_pos*2+1].srce_ad = BUS_DMA_MEM(&pwm_data[above*3 + 1]);
         cbs_buffer[below*2+1].next_cb = BUS_DMA_MEM(&cbs[empty_pos*2]);
         cbs_buffer[below*2+1].srce_ad = BUS_DMA_MEM(&pwm_data[empty_pos*3 + 1]);
-        pwm_data_buffer[empty_pos*3+1] = cbs_buffer[below*2].unused + pwm_data_buffer[below*3+1] - on_time;
+        //pwm_data_buffer[empty_pos*3+1] = cbs_buffer[below*2].unused + pwm_data_buffer[below*3+1] - on_time;
+        pwm_data_buffer[empty_pos*3+1] = (above == 0 ? pwm_period - on_time : cbs_buffer[above*2].unused - on_time);
         pwm_data_buffer[below*3+1] = on_time - cbs_buffer[below*2].unused;
         pwm_data_buffer[empty_pos*3] = (1<<pin);
         cbs_buffer[empty_pos*2].unused = on_time;
@@ -168,16 +182,28 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
 #if DEBUG
     uint8_t idx = 0;
     do {
-        printf("%03d  (%05d)  ", idx, pwm_data_buffer[idx/2*3+1]);
+        if (logptr) LOG("%03d  (%05d)  ", idx, pwm_data_buffer[idx/2*3+1]);
+        else printf("%03d  (%05d)  ", idx, pwm_data_buffer[idx/2*3+1]);
         idx = (cbs_buffer[idx].next_cb - BUS_DMA_MEM(cbs))/sizeof(DMA_CB);
     } while (idx != 0);
-    printf("000\n");
+    if (logptr) {
+        LOG("000\n");
+        LOG_FLUSH;
+    }
+    else printf("000\n");
 #endif
 }
 
 void pwm_update() {
     memcpy(cbs, cbs_buffer, 2112);
     memcpy(pwm_data, pwm_data_buffer, 396);
+    if (logptr) {
+//        for (int i=0; i < 21; i++) LOG("  %08X: %08X\n", BUS_DMA_MEM(&pwm_data[i]), pwm_data[i]);
+        for (int i=0; i < 14; i++) {
+            LOG("%02d: CB_ADDR: %08X, SRCE_AD: %08X, DEST_AD: %08X, NEXT_CB: %08X, OFFSET: %08X, delay: %08X\n", i, BUS_DMA_MEM(&cbs[i]), cbs[i].srce_ad, cbs[i].dest_ad, cbs[i].next_cb, cbs[i].unused, pwm_data[i*3/2 + 1]);
+        }
+        LOG_FLUSH;
+    }
 }
 
 void pwm_begin(uint8_t num_ch, int freq) {
