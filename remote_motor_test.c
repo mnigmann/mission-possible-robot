@@ -115,6 +115,8 @@ void raise_shovel() {
 
 #ifdef MAIN_IS_REMOTE
 int main() {
+    logptr = fopen("/home/pi/robot_log.txt", "a");
+    LOG("------------ STARTING ROBOT ------------\n"); LOG_FLUSH;
 
     init_memory();
     pwm_begin(32, 100000);
@@ -127,7 +129,7 @@ int main() {
 
 int main_remote(int *pipes) {
     gpio_mode(SERVO_AZIMUTH, 1);
-    gpio_mode(SERVO_ELEVATION, 1);
+    gpio_mode(SERVO_ELEVATION, GPIO_ALT5);
     gpio_mode(MOTOR_ARM, 1);
     gpio_mode(MOTOR_SHOVEL, 1);
     gpio_mode(ENC_CLK, 0);
@@ -139,8 +141,6 @@ int main_remote(int *pipes) {
     pwm_set_channel(MOTOR_SHOVEL, 300);
     pwm_update();    
     
-    logptr = fopen("/home/pi/robot_log.txt", "a");
-    LOG("------------ STARTING ROBOT ------------\n"); LOG_FLUSH;
 
 #ifndef MAIN_IS_REMOTE
     fcntl(pipes[0], F_SETFL, O_NONBLOCK);
@@ -221,7 +221,7 @@ int main_remote(int *pipes) {
                 } else if (val < last_value) usleep(100);
                 last_value = gpio_in(ENC_CLK);
                 avg = (double)total*CLOCKS_PER_SEC/((double)(clock() - start));
-                sprintf(temp, "average speed: %f, probably %c     ", avg, (avg < 10 ? 'O' : (avg < 40 ? 'L' : (avg < 70 ? 'M' : 'H'))));
+                sprintf(temp, "average speed: %f, probably %c     ", avg, (avg < ENC_OFFMAX ? 'O' : (avg < ENC_LOWMAX ? 'L' : (avg < ENC_MEDMAX ? 'M' : 'H'))));
                 mvaddstr(8, UI_VA, temp);
                 refresh();
                 if (getch() == 'V') {

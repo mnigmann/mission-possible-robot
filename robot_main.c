@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <time.h>
 
 #define MOTOR_LEFT      17
 #define MOTOR_RIGHT     23
@@ -21,6 +22,9 @@ char inbuf[10];
 
 int main() {
     signal(SIGINT, terminate);
+    logptr = fopen("/home/pi/robot_log.txt", "a");
+    LOG("------------ STARTING ROBOT ------------\n"); LOG_FLUSH;
+
     init_memory();
     pwm_begin(32, 100000);
 
