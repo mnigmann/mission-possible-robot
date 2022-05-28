@@ -197,6 +197,7 @@ void pwm_set_channel(uint8_t pin, uint32_t on_time) {
 void pwm_update() {
     memcpy(cbs, cbs_buffer, 2112);
     memcpy(pwm_data, pwm_data_buffer, 396);
+#if DEBUG
     if (logptr) {
 //        for (int i=0; i < 21; i++) LOG("  %08X: %08X\n", BUS_DMA_MEM(&pwm_data[i]), pwm_data[i]);
         for (int i=0; i < 14; i++) {
@@ -204,6 +205,7 @@ void pwm_update() {
         }
         LOG_FLUSH;
     }
+#endif
 }
 
 void pwm_begin(uint8_t num_ch, int freq) {

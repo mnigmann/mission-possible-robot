@@ -3,13 +3,16 @@
 #include <fcntl.h>
 #include "peripherals.h"
 #include "config.h"
+#include "remote_motor_test.h"
 
-char temp[64];
+char temp[100];
 char inbuf[10];
+int32_t totals[16];
 uint16_t c;
 
 void getSunAngle(double *az, double *el) {
     int r = 3;
+    lower_shovel();
     pwm_set_channel(SERVO_ELEVATION, 480);
     while (*VIRT_DMA_REG(DMA_NEXTCONBK) != BUS_DMA_MEM(virt_dma_mem));
     pwm_update();
@@ -53,8 +56,10 @@ void getSunAngle(double *az, double *el) {
     LOG("Best angle found: %d\n", bestAngle); LOG_FLUSH;
     *el = (480 - bestAngle) / 2;
     pwm_set_channel(SERVO_ELEVATION, bestAngle);
+    pwm_set_channel(SERVO_AZIMUTH, 300);
     while (*VIRT_DMA_REG(DMA_NEXTCONBK) != BUS_DMA_MEM(virt_dma_mem));
     pwm_update();
+    raise_shovel();
 }
 
 void deploy_arm() {
@@ -99,6 +104,16 @@ void lower_shovel() {
     refresh();
 }
 
+void release_flag() {
+    pwm_set_channel(MOTOR_FLAG, 300+MOTOR_FLAG_SPEED);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+    usleep(MOTOR_FLAG_ONTIME);
+    pwm_set_channel(MOTOR_FLAG, 300);
+    while (*VIRT_DMA_REG(DMA_CONBLK_AD) != BUS_DMA_MEM(virt_dma_mem));
+    pwm_update();
+}
+
 void raise_shovel() {
     mvaddstr(5, UI_ST, "raising ");
     refresh();
@@ -111,6 +126,24 @@ void raise_shovel() {
     pwm_update();
     mvaddstr(5, UI_ST, "raised  ");
     refresh();
+}
+
+void get_temperature() {
+    mvaddstr(4, UI_ST, "reading          ");
+    refresh();
+    FILE *tptr = fopen("/sys/bus/w1/devices/28-000006d75ce4/w1_slave", "r");
+    int len = fread(temp, 1, 75, tptr);
+    temp[75] = 0;
+    LOG("Received temperature (%d): %s\n", len, temp+69);
+    if (len == 75) {
+        mvaddstr(4, UI_VA, temp + 69);
+        refresh();
+    } else {
+        mvaddstr(4, UI_ST, "error        ");
+        mvaddstr(4, UI_VA, "      ");
+        refresh();
+    }
+    fclose(tptr);
 }
 
 #ifdef MAIN_IS_REMOTE
@@ -129,16 +162,18 @@ int main() {
 
 int main_remote(int *pipes) {
     gpio_mode(SERVO_AZIMUTH, 1);
-    gpio_mode(SERVO_ELEVATION, GPIO_ALT5);
+    gpio_mode(SERVO_ELEVATION, 1);
     gpio_mode(MOTOR_ARM, 1);
     gpio_mode(MOTOR_SHOVEL, 1);
+    gpio_mode(MOTOR_FLAG, 1);
     gpio_mode(ENC_CLK, 0);
     gpio_mode(ENC_DIR, 0);
     
-    pwm_set_channel(SERVO_AZIMUTH, 120);
+    pwm_set_channel(SERVO_AZIMUTH, 300);
     pwm_set_channel(SERVO_ELEVATION, 480);
     pwm_set_channel(MOTOR_ARM, 300);
     pwm_set_channel(MOTOR_SHOVEL, 300);
+    pwm_set_channel(MOTOR_FLAG, 300);
     pwm_update();    
     
 
@@ -205,25 +240,46 @@ int main_remote(int *pipes) {
             lower_shovel();
         } else if (c == 'G') {
             raise_shovel();
+        } else if (c == 'f') {
+            release_flag();
+        } else if (c == 't') {
+            get_temperature();
         } else if (c == 'v') {
             mvaddstr(8, UI_ST, "sampling    ");
             refresh();
             clock_t start = clock();
             uint32_t total = 0, val, last_value = 0;
+            double time_diff = 0;
+            uint8_t last_idx = 0;
+            uint8_t idx = 0;
             double avg = 0;
+            uint8_t n_int = 0;
+            memset(totals, 0, sizeof(int32_t)*16);
 
             while (1) {
                 val = gpio_in(ENC_CLK);
+                time_diff = ((double)(clock() - start))/CLOCKS_PER_SEC;
+                idx = (uint8_t)(time_diff / ENC_INTSIZE) % ENC_NUMINT;
+                if (idx != last_idx) {
+                    if (n_int < ENC_NUMINT) n_int ++;
+                    avg = 0;
+                    for (uint8_t i=0; i < n_int; i++) {
+                        avg += totals[i];
+                    }
+                    avg /= (n_int - 1);
+                    sprintf(temp, "average speed: %f, probably %c              ", avg, (avg < ENC_OFFMAX ? 'O' : (avg < ENC_LOWMAX ? 'L' : (avg < ENC_MEDMAX ? 'M' : 'H'))));
+                    mvaddstr(8, UI_VA, temp);
+                    refresh();
+                    last_idx = idx;
+                    totals[idx] = 0;
+                }
                 if (val > last_value) {
                     if (gpio_in(ENC_DIR)) total++;
                     else total--;
+                    totals[idx] ++; 
                     usleep(100);
                 } else if (val < last_value) usleep(100);
                 last_value = gpio_in(ENC_CLK);
-                avg = (double)total*CLOCKS_PER_SEC/((double)(clock() - start));
-                sprintf(temp, "average speed: %f, probably %c     ", avg, (avg < ENC_OFFMAX ? 'O' : (avg < ENC_LOWMAX ? 'L' : (avg < ENC_MEDMAX ? 'M' : 'H'))));
-                mvaddstr(8, UI_VA, temp);
-                refresh();
                 if (getch() == 'V') {
                     mvaddstr(8, UI_ST, "not sampling");
                     refresh();
